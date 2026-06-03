@@ -4,7 +4,8 @@ import path from "node:path";
 
 const port = Number(process.env.PORT || 3000);
 const distRoot = path.resolve("dist");
-const tavilyKey = process.env.TAVILY_API_KEY;
+const openaiKey = process.env.OPENAI_API_KEY;
+const openaiModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
 const cryptoCompetitors = ["Koinly", "CoinTracker", "TaxBit", "TokenTax", "CoinLedger", "Binance Tax"];
 const exchangeHints = ["Coinbase", "Binance", "Kraken", "Gemini", "Crypto.com", "SwissBorg", "Bitstamp", "Robinhood", "OKX", "Bybit", "Bitget", "KuCoin", "Bitpanda", "eToro"];
@@ -41,9 +42,9 @@ const demoResults = [
     competitors: ["CoinTracker", "TaxBit", "Koinly"],
     trigger: "Tax software integration",
     expandedSummary: "Coinbase is a major cryptocurrency exchange platform serving both retail and institutional users, and has integrated CoinTracker's crypto tax software to assist users with tax reporting.",
-    relevance: "This is demo data. Add TAVILY_API_KEY on Render to turn this into real-time web search.",
+    relevance: "This is demo data. Add OPENAI_API_KEY on Render to turn this into real-time web search.",
     evidence: [{ label: "Demo evidence placeholder", type: "Partner page", url: "https://example.com" }],
-    timeline: ["Demo signal shown because live search is not configured", "Add a search API key in Render environment variables", "Redeploy the web service"],
+    timeline: ["Demo signal shown because live search is not configured", "Add OPENAI_API_KEY in Render environment variables", "Redeploy the web service"],
     contacts: ["Head of Product", "Tax Operations Lead", "Head of Compliance"]
   }
 ];
@@ -132,27 +133,94 @@ function normalizeResult(result, index, query) {
   };
 }
 
-async function tavilySearch(query) {
-  const response = await fetch("https://api.tavily.com/search", {
+function extractOpenAIText(payload) {
+  if (payload.output_text) return payload.output_text;
+
+  return (payload.output || [])
+    .flatMap((item) => item.content || [])
+    .filter((content) => content.type === "output_text" || content.type === "text")
+    .map((content) => content.text || "")
+    .join("\n");
+}
+
+function parseJsonObject(text) {
+  const cleaned = text
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("OpenAI did not return a JSON object.");
+  return JSON.parse(cleaned.slice(start, end + 1));
+}
+
+function normalizeModelResult(result, index) {
+  const company = result.company || detectCompany(result);
+  const primaryUrl = result.evidence?.[0]?.url || "";
+  const sourceType = result.sourceType || result.evidence?.[0]?.type || classifySource({ ...result, url: primaryUrl, content: result.expandedSummary });
+  const confidence = Number(result.confidence || 78);
+  const score = Number(result.score || confidence + 8);
+
+  return {
+    id: `openai-${index}-${company.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    company,
+    initials: initials(company),
+    color: ["#0d6efd", "#14b8a6", "#111827", "#6d28d9", "#0f766e"][index % 5],
+    title: result.title || `${company} matched your GTM signal`,
+    date: result.date || new Date().toISOString().slice(0, 10),
+    activityDate: new Date().toISOString(),
+    email: result.email || `.....@${domainFromUrl(primaryUrl)}`,
+    sourceType,
+    confidence,
+    score,
+    liveScore: score,
+    accountFit: result.accountFit || "Target account",
+    gtmStage: result.gtmStage || (confidence >= 88 ? "High intent" : confidence >= 80 ? "Expansion" : "Education"),
+    outreachAngle: result.outreachAngle || "Reference the cited source and ask who owns this initiative.",
+    competitors: Array.isArray(result.competitors) && result.competitors.length ? result.competitors : ["Relevant vendor signal"],
+    trigger: result.trigger || "Public GTM signal",
+    expandedSummary: result.expandedSummary || result.summary || result.title || `${company} matched this outbound signal.`,
+    relevance: result.relevance || "This account appeared in live web results for your GTM query and has source evidence you can cite in outbound outreach.",
+    evidence: Array.isArray(result.evidence) && result.evidence.length ? result.evidence : [{ label: result.title || company, type: sourceType, url: primaryUrl }],
+    timeline: Array.isArray(result.timeline) && result.timeline.length ? result.timeline : ["OpenAI web search found source evidence", "Signal normalized into outbound-ready account", "Review evidence before sequencing outreach"],
+    contacts: Array.isArray(result.contacts) && result.contacts.length ? result.contacts : ["Head of Product", "VP Operations", "Head of Partnerships", "Head of Compliance"]
+  };
+}
+
+async function openAISignalSearch(query, filters) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${tavilyKey}`
+      Authorization: `Bearer ${openaiKey}`
     },
     body: JSON.stringify({
-      query,
-      search_depth: "advanced",
-      max_results: 10,
-      include_answer: false,
-      include_raw_content: false
+      model: openaiModel,
+      tools: [{ type: "web_search" }],
+      tool_choice: "auto",
+      include: ["web_search_call.action.sources"],
+      input: [
+        {
+          role: "system",
+          content: "You are a GTM signal analyst for outbound sales. Use web search to find current, source-backed buying signals. Return strict JSON only."
+        },
+        {
+          role: "user",
+          content: `Find outbound sales GTM signals for this query:\n\n${query}\n\nFilters:\n- Start date: ${filters.startDate || "not specified"}\n- End date: ${filters.endDate || "not specified"}\n- Source types: ${(filters.sourceTypes || []).join(", ") || "any"}\n- Keywords: ${(filters.keywords || []).join(", ") || "any"}\n\nReturn a JSON object with a results array of up to 10 accounts. Each result must have: company, title, date, sourceType, confidence, score, accountFit, gtmStage, outreachAngle, competitors, trigger, expandedSummary, relevance, evidence, timeline, contacts. Evidence must be an array of objects with label, type, and url. Use only source URLs found through web search. Do not invent URLs.`
+        }
+      ]
     })
   });
 
   if (!response.ok) {
-    throw new Error(`Search provider returned ${response.status}`);
+    const text = await response.text();
+    throw new Error(`OpenAI returned ${response.status}: ${text.slice(0, 300)}`);
   }
 
-  return response.json();
+  const payload = await response.json();
+  return parseJsonObject(extractOpenAIText(payload));
 }
 
 async function handleSignals(req, res) {
@@ -164,21 +232,21 @@ async function handleSignals(req, res) {
       return;
     }
 
-    if (!tavilyKey) {
+    if (!openaiKey) {
       sendJson(res, 200, {
         mode: "demo",
-        message: "Live web search is not configured yet. Add TAVILY_API_KEY to the Render service environment variables.",
+        message: "Live web search is not configured yet. Add OPENAI_API_KEY to the Render service environment variables.",
         results: demoResults
       });
       return;
     }
 
-    const search = await tavilySearch(query);
-    const results = (search.results || []).map((result, index) => normalizeResult(result, index, query));
+    const search = await openAISignalSearch(query, body);
+    const results = (search.results || []).map((result, index) => normalizeModelResult(result, index));
 
     sendJson(res, 200, {
       mode: "live",
-      message: `Found ${results.length} live web results.`,
+      message: `Found ${results.length} live OpenAI web-search signals.`,
       results
     });
   } catch (error) {

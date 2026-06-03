@@ -6,5 +6,9 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
-      - key: TAVILY_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: NODE_VERSION
+        value: 24.14.1

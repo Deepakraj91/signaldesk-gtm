@@ -13,6 +13,7 @@ npm run dev
 
 - Build command: `npm install && npm run build`
 - Start command: `npm start`
-- Environment variable for live search: `TAVILY_API_KEY`
+- Environment variable for live search: `OPENAI_API_KEY`
+- Optional model override: `OPENAI_MODEL`
 
 Use the `render.yaml` Blueprint to create the Node Web Service. A static site will load the UI, but it cannot run `/api/signals`.
