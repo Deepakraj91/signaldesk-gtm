@@ -9,7 +9,10 @@ npm install
 npm run dev
 ```
 
-## Render Static Site Settings
+## Render Web Service Settings
 
 - Build command: `npm install && npm run build`
-- Publish directory: `dist`
+- Start command: `npm start`
+- Environment variable for live search: `TAVILY_API_KEY`
+
+Use the `render.yaml` Blueprint to create the Node Web Service. A static site will load the UI, but it cannot run `/api/signals`.
