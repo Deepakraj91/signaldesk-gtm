@@ -37,6 +37,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: .68;
+}
+
 .sidebar {
   position: fixed;
   inset: 0 auto 0 0;
@@ -397,6 +402,38 @@ select:focus {
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-bottom: 18px;
+}
+
+.search-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #40506a;
+}
+
+.search-status strong {
+  color: #253047;
+}
+
+.search-status.live {
+  border-color: #b9ead7;
+  background: #f0fbf6;
+}
+
+.search-status.demo,
+.search-status.seed {
+  border-color: #f2d5a5;
+  background: #fff9ed;
+}
+
+.search-status.error {
+  border-color: #f2b8b5;
+  background: #fff4f3;
 }
 
 .insight-strip div {

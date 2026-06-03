@@ -251,8 +251,10 @@ function App() {
   const [active, setActive] = useState(false);
   const [drawerCompany, setDrawerCompany] = useState(null);
   const [toast, setToast] = useState("");
+  const [liveResults, setLiveResults] = useState(null);
+  const [searchState, setSearchState] = useState({ loading: false, mode: "seed", message: "Showing seeded sample accounts. Run a live search to fetch current signals." });
 
-  const results = useMemo(() => {
+  const seedResults = useMemo(() => {
     const queryTerms = query.toLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length > 3);
     const selectedKeywordSet = new Set(keywords);
 
@@ -275,6 +277,15 @@ function App() {
       });
   }, [endDate, keywords, query, selectedSources, sortBy, startDate]);
 
+  const results = useMemo(() => {
+    const base = liveResults || seedResults;
+    return [...base].sort((a, b) => {
+      if (sortBy === "date") return new Date(b.date) - new Date(a.date);
+      if (sortBy === "confidence") return b.confidence - a.confidence;
+      return (b.liveScore || b.score) - (a.liveScore || a.score);
+    });
+  }, [liveResults, seedResults, sortBy]);
+
   const stats = useMemo(() => ({
     highIntent: results.filter((result) => result.gtmStage === "High intent").length,
     contacts: new Set(results.flatMap((result) => result.contacts)).size,
@@ -284,6 +295,39 @@ function App() {
   function flash(message) {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
+  }
+
+  async function runSignalSearch() {
+    setSearchState({ loading: true, mode: "searching", message: "Searching the web for fresh GTM signals..." });
+    try {
+      const response = await fetch("/api/signals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query,
+          startDate,
+          endDate,
+          sourceTypes: selectedSources,
+          keywords
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Search failed.");
+      setLiveResults(payload.results || []);
+      setSearchState({
+        loading: false,
+        mode: payload.mode || "live",
+        message: payload.message || `Found ${(payload.results || []).length} signals.`
+      });
+      flash(payload.mode === "live" ? "Live signal search complete." : "Search backend responded in demo mode.");
+    } catch (error) {
+      setSearchState({
+        loading: false,
+        mode: "error",
+        message: error instanceof Error ? error.message : "Search failed."
+      });
+      flash("Signal search failed. Check backend configuration.");
+    }
   }
 
   function toggleKeyword(key) {
@@ -332,7 +376,9 @@ function App() {
             <span className={`status-pill ${active ? "active" : ""}`}>{active ? "Active" : "Inactive"}</span>
           </div>
           <div className="top-actions">
-            <button className="ghost-button" onClick={() => flash("Outbound preview refreshed from your current filters.")}>Preview Accounts</button>
+            <button className="ghost-button" onClick={runSignalSearch} disabled={searchState.loading}>
+              {searchState.loading ? "Searching..." : "Search Live Signals"}
+            </button>
             <button className="primary-button" onClick={() => {
               setActive((value) => !value);
               flash(active ? "Signal paused." : "Signal activated. New outbound-ready accounts will be monitored daily.");
@@ -360,6 +406,8 @@ function App() {
             sortBy={sortBy}
             setSortBy={setSortBy}
             openDrawer={setDrawerCompany}
+            searchState={searchState}
+            usingLiveResults={Boolean(liveResults)}
           />
         </section>
       </main>
@@ -459,13 +507,13 @@ function SignalBuilder({ query, setQuery, startDate, setStartDate, endDate, setE
   );
 }
 
-function Results({ results, stats, sortBy, setSortBy, openDrawer }) {
+function Results({ results, stats, sortBy, setSortBy, openDrawer, searchState, usingLiveResults }) {
   return (
     <section className="results" aria-label="Preview results">
       <div className="results-head">
         <div>
           <h2>{results.length} outbound-ready accounts</h2>
-          <p>Accounts with source-backed GTM triggers, contact personas, and outreach angles.</p>
+          <p>{usingLiveResults ? "Live account signals returned from the backend search engine." : "Seeded examples. Click Search Live Signals to run a new real-time query."}</p>
         </div>
         <div className="controls">
           <label htmlFor="sortSelect">Sort</label>
@@ -475,6 +523,10 @@ function Results({ results, stats, sortBy, setSortBy, openDrawer }) {
             <option value="confidence">Confidence</option>
           </select>
         </div>
+      </div>
+      <div className={`search-status ${searchState.mode}`}>
+        <strong>{searchState.mode === "live" ? "Live search" : searchState.mode === "demo" ? "Backend demo mode" : searchState.mode === "error" ? "Search error" : searchState.mode === "searching" ? "Searching" : "Sample mode"}</strong>
+        <span>{searchState.message}</span>
       </div>
       <div className="insight-strip">
         <div><strong>{stats.highIntent}</strong><span>high-intent accounts</span></div>
