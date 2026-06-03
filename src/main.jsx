@@ -311,6 +311,10 @@ function App() {
           keywords
         })
       });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error("This URL is serving the static UI only. Deploy the Render Web Service to enable /api/signals.");
+      }
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Search failed.");
       setLiveResults(payload.results || []);
